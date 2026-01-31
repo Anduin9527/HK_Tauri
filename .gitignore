@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.DS_Store
+
+# Backend
+backend/models/
+!backend/models/.keep
+backend/history/
+backend/runs/
+
+# Node
+node_modules/
+dist/
+.DS_Store
+
+# Tauri
+src-tauri/target/
