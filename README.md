@@ -86,6 +86,60 @@ npm run tauri build
 ```
 构建产物将位于 `frontend/src-tauri/target/release/bundle/` 目录下。
 
+### 📄 Windows 离线部署详细指南
+
+本部分详细说明如何在 Windows 环境下将 Tauri 应用与 Python 后端打包为独立的 `.exe` 安装包，适用于无网络工厂环境部署。
+
+#### 1. 环境准备 (Windows 开发机)
+
+由于包含 Python 依赖（如 numpy, opencv）和海康威视 DLL，**强烈建议在 Windows 虚拟机或真机上进行打包操作**。
+
+需要安装：
+1.  **Python 3.10+**: 确保加入 PATH。
+2.  **Node.js & Rust**: Tauri 的标准开发环境。
+3.  **海康威视 MVS SDK**: 安装客户端以获取必要的 DLL 和驱动。
+4.  **PyInstaller**: `pip install pyinstaller`
+
+#### 2. 打包 Python 后端
+
+我们需先将 Python 后端打包成独立的 sidecar。
+
+**步骤**:
+1.  进入 `backend` 目录。
+2.  确保 `MvImport` 文件夹存在。
+3.  执行 PyInstaller 命令（包含所有依赖）：
+    ```powershell
+    pyinstaller --noconfirm --onefile --windowed --name backend ^
+        --add-data "models;models" ^
+        --add-data "history;history" ^
+        --add-data "MvImport;MvImport" ^
+        --hidden-import socketio ^
+        --hidden-import uvicorn ^
+        --hidden-import engineio.async_drivers.asgi ^
+        main.py
+    ```
+4.  在 `dist/` 目录找到 `backend.exe`。
+
+#### 3. 配置 Tauri Sidecar
+
+1.  **获取 Target Triple**: 运行 `rustc -vV | findstr host` (例如 `x86_64-pc-windows-msvc`)。
+2.  **复制二进制文件**: 将 `backend.exe` 复制到 `frontend/src-tauri/binaries/` 并重命名为 `backend-x86_64-pc-windows-msvc.exe`。
+3.  **主要配置**: 确保 `tauri.conf.json` 中 `bundle.externalBin` 包含 `["binaries/backend"]`。
+
+#### 4. 处理海康 SDK
+
+海康 SDK 依赖系统级 DLL。
+*   **开发打包时**: 无需特殊操作，只要运行环境有驱动。
+*   **部署时**: 推荐在目标机器安装 MVS 客户端。如果在完全纯净环境运行绿色版，需手动将海康 `Runtime` 目录下的 DLL 复制到程序运行目录。
+
+#### 5. 构建最终安装包
+
+```powershell
+cd frontend
+npm run tauri build
+```
+生成的 `.exe` 安装包即可分发到无网工厂电脑。
+
 ## ⚠️ 常见问题
 
 *   **相机无法连接**: 

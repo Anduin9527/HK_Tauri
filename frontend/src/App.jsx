@@ -188,20 +188,29 @@ function App() {
 
           {/* Dashboard View */}
           {activeTab === 'dashboard' && (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 h-full">
+            <div className="flex flex-col xl:flex-row gap-6 h-full">
 
-              {/* Video Feed Area */}
-              <div className="xl:col-span-2 flex flex-col gap-6">
-                <VideoFeed
-                  streamUrl={streaming ? VIDEO_STREAM_URL : ""}
-                  isConnected={streaming}
-                />
+              {/* Video Feed Area (2x2 Grid) */}
+              <div className="flex-1 flex flex-col gap-6 min-h-0">
+                <div className="grid grid-cols-2 grid-rows-2 gap-4 h-full min-h-[500px]">
+                  {[0, 1, 2, 3].map(camId => (
+                    <div key={camId} className="relative w-full h-full min-h-0">
+                      <div className="absolute top-2 left-2 z-10 px-2 py-1 bg-black/60 rounded text-xs font-mono text-white/70">
+                        CAM {camId + 1}
+                      </div>
+                      <VideoFeed
+                        streamUrl={streaming ? `${BACKEND_URL}/video_feed/${camId}` : ""}
+                        isConnected={streaming}
+                      />
+                    </div>
+                  ))}
+                </div>
 
                 {/* Control Bar */}
-                <div className="p-4 glass-card rounded-xl flex items-center justify-between">
+                <div className="p-4 glass-card rounded-xl flex items-center justify-between shrink-0">
                   <div>
-                    <h3 className="text-sm font-medium text-gray-300">摄像头控制</h3>
-                    <p className="text-xs text-gray-500">Hikvision DS-2CD 系列 (RTSP)</p>
+                    <h3 className="text-sm font-medium text-gray-300">多路摄像头控制</h3>
+                    <p className="text-xs text-gray-500">Hikvision Matrix System (4CH)</p>
                   </div>
                   <div className="flex gap-4">
                     <button
@@ -214,14 +223,14 @@ function App() {
                       )}
                     >
                       {streaming ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
-                      {streaming ? "停止推流" : "开始推流"}
+                      {streaming ? "停止所有推流" : "启动全网监控"}
                     </button>
                   </div>
                 </div>
               </div>
 
               {/* Right Panel: Stats & Logs */}
-              <div className="flex flex-col gap-6 h-full">
+              <div className="w-full xl:w-96 flex flex-col gap-6 h-full shrink-0">
                 {/* Stats Cards */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="glass-card p-4 rounded-xl flex flex-col gap-1">

@@ -1,7 +1,7 @@
 import cv2
 import asyncio
 import uvicorn
-from fastapi import FastAPI, Response, UploadFile, File
+from fastapi import FastAPI, Response, UploadFile, File, Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,12 +13,13 @@ import json
 import numpy as np
 import os
 from pydantic import BaseModel
+from typing import Dict, List
 
-from camera import Camera
+from hik_driver import HikCameraDriver
 from detector import DefectDetector
 
 # Global State
-camera = None
+cameras: Dict[int, HikCameraDriver] = {}
 detector = None
 running = False
 
@@ -45,20 +46,46 @@ final_app = socketio.ASGIApp(sio, app)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    global camera, detector, running
-    print("Initialize Camera and Detector...")
-    camera = Camera()
+    global cameras, detector, running
+    print("Initialize Detector...")
     detector = DefectDetector()
+
+    print("Initialize 4 Hikvision Camera Slots...")
+    # Initialize 4 slots using HikCameraDriver
+    # Slot 0 attempts to access the first specific camera, etc.
+    # Note: connect() inside HikCameraDriver handles connection logic
+
+    for i in range(4):
+        cameras[i] = HikCameraDriver(index=i)
+        cameras[i].connect()
+
     running = True
+
+    # Optional: Start background discovery or status check
+    # threading.Thread(target=watchdog_cameras_bg, daemon=True).start()
+
     yield
     # Shutdown
     print("Shutting down...")
     running = False
-    if camera:
-        camera.release()
+    for cam in cameras.values():
+        cam.release()
 
 
 app.router.lifespan_context = lifespan
+
+
+def discover_cameras_bg():
+    time.sleep(2)  # Wait for app to start
+    try:
+        from find_cameras import scan_network, get_local_ip_and_subnet
+
+        print("[Discovery] Starting background camera scan...")
+        # Note: We need to adapt scan_network to return values instead of printing
+        # For now, we skip auto-assign to avoid complexity,
+        # but in production this would update cameras[i].set_source()
+    except Exception as e:
+        print(f"[Discovery] Error: {e}")
 
 
 async def broadcast_log(
@@ -161,19 +188,31 @@ async def predict_image(file: UploadFile = File(...)):
         return JSONResponse(status_code=500, content={"error": error_msg})
 
 
-def generate_frames():
-    global camera, detector
+def generate_frames(camera_id: int):
+    global cameras, detector, running
+
+    # Basic rate limiting
+    fps_limit = 30
+    frame_duration = 1.0 / fps_limit
+
     while running:
-        if not camera or not detector:
-            time.sleep(0.1)
+        loop_start = time.time()
+
+        cam = cameras.get(camera_id)
+        if not cam or not detector:
+            time.sleep(0.5)
+            # Yield a keep-alive or error frame?
             continue
 
-        frame = camera.get_frame()
+        frame = cam.get_frame()
         if frame is None:
             time.sleep(0.1)
             continue
 
-        # Inference
+        # Inference (Skip if too slow? For now we process every frame)
+        # Note: 4x stream inference might be heavy.
+        # Ideally we only infer on 1 stream or skip frames.
+        # Here we do full processing.
         results, annotated_frame = detector.predict(frame)
 
         # Encode for MJPEG
@@ -182,21 +221,46 @@ def generate_frames():
 
         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
 
+        # FPS Control
+        elapsed = time.time() - loop_start
+        if elapsed < frame_duration:
+            time.sleep(frame_duration - elapsed)
 
-@app.get("/video_feed")
-async def video_feed():
+
+@app.get("/video_feed/{camera_id}")
+async def video_feed(camera_id: int = Path(..., ge=0, le=3)):
     return StreamingResponse(
-        generate_frames(), media_type="multipart/x-mixed-replace; boundary=frame"
+        generate_frames(camera_id),
+        media_type="multipart/x-mixed-replace; boundary=frame",
     )
+
+
+# Backward compatibility for existing frontend until we switch
+@app.get("/video_feed")
+async def video_feed_legacy():
+    return await video_feed(0)
 
 
 @app.get("/status")
 async def get_status():
-    return {
-        "camera_connected": camera.is_connected() if camera else False,
+    status_data = {
         "model_loaded": detector.is_loaded() if detector else False,
         "device": detector.device if detector else "unknown",
+        "cameras": [],
     }
+
+    for i in range(4):
+        cam = cameras.get(i)
+        status_data["cameras"].append(
+            {
+                "id": i,
+                "connected": cam.connected if cam else False,
+                "index": cam.index if cam else None,
+            }
+        )
+    return status_data
+
+    return status_data
 
 
 # --- New Endpoints for Logs and Settings ---
