@@ -10,8 +10,8 @@ const VideoFeed = ({ streamUrl, isConnected, onMaximize, isMaximized, fps, autoI
     const [activeUrl, setActiveUrl] = useState("");
     const [lastGoodUrl, setLastGoodUrl] = useState("");
 
-    // Append query param for detection toggle
-    const profile = isMaximized ? 'full' : 'grid';
+    // Use consistent profile to prevent reloading on maximize/minimize
+    const profile = 'grid'; // Always use grid profile for seamless transition
     const finalUrl = streamUrl ? `${streamUrl}?type=${showDetections ? 'detect' : 'raw'}&profile=${profile}` : "";
 
     useEffect(() => {

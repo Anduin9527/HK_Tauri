@@ -263,7 +263,7 @@ async def broadcast_log(
     title: str, message: str, level: str = "info", attachment: str = None
 ):
     """Emit log message to all connected clients and save to local file"""
-    timestamp = time.strftime("%H:%M:%S")
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         # 1. Print to console
         print(f"[LOG] {title}: {message}")
@@ -371,7 +371,7 @@ async def predict_image(file: UploadFile = File(...)):
 
 
 def draw_detections(frame, detections):
-    """Draw detections on frame using OpenCV"""
+    """Draw detections on frame using OpenCV (with PIL for Chinese support)"""
     if not detections:
         return frame
 
@@ -380,32 +380,68 @@ def draw_detections(frame, detections):
     elif frame is not None and hasattr(frame, "shape") and len(frame.shape) == 3 and frame.shape[2] == 1:
         frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
     
-    # Copy frame to avoid modifying original if needed (optional, but safer)
-    # img = frame.copy() 
-    img = frame # In-place for performance
+    img = frame
     
-    for det in detections:
-        # Get coordinates
-        xyxy = det.get("xyxy")
-        if not xyxy:
-            continue
+    # Label mapping
+    label_map_cn = {"item": "缺陷", "defect": "缺陷"}
+    label_map_en = {"item": "QueXian", "defect": "Defect"}
+
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        
+        # Convert to PIL
+        img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        draw = ImageDraw.Draw(img_pil)
+        
+        # Load Font (Windows: Microsoft YaHei)
+        font = None
+        try:
+            font = ImageFont.truetype("msyh.ttc", 20)
+        except IOError:
+            try:
+                font = ImageFont.truetype("simhei.ttf", 20)
+            except IOError:
+                font = ImageFont.load_default()
+
+        for det in detections:
+            xyxy = det.get("xyxy")
+            if not xyxy: continue
+            x1, y1, x2, y2 = map(int, xyxy[0])
+            conf = det.get("conf", 0)
+            raw_label = det.get("label", "Unknown")
             
-        x1, y1, x2, y2 = map(int, xyxy[0])
-        conf = det.get("conf", 0)
-        label = det.get("label", "Unknown")
-        
-        # Color: Green
-        color = (0, 255, 0)
-        
-        # Draw Box
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-        
-        # Draw Label
-        text = f"{label} {conf:.2f}"
-        t_size = cv2.getTextSize(text, 0, fontScale=0.5, thickness=1)[0]
-        c2 = x1 + t_size[0], y1 - t_size[1] - 3
-        cv2.rectangle(img, (x1, y1), c2, color, -1, cv2.LINE_AA)  # filled
-        cv2.putText(img, text, (x1, y1 - 2), 0, 0.5, [255, 255, 255], thickness=1, lineType=cv2.LINE_AA)
+            # Use Chinese label if font supports it (msyh/simhei), otherwise fallback
+            label = label_map_cn.get(raw_label.lower(), raw_label)
+            
+            color = (0, 255, 0)
+            draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+            
+            text = f"{label} {conf:.2f}"
+            bbox = draw.textbbox((x1, y1 - 25), text, font=font)
+            draw.rectangle(bbox, fill=color)
+            draw.text((x1, y1 - 25), text, font=font, fill=(255, 255, 255))
+            
+        return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+    except Exception as e:
+        # Fallback to OpenCV
+        for det in detections:
+            xyxy = det.get("xyxy")
+            if not xyxy: continue
+            x1, y1, x2, y2 = map(int, xyxy[0])
+            conf = det.get("conf", 0)
+            raw_label = det.get("label", "Unknown")
+            # Use Pinyin/English to avoid garbage chars
+            label = label_map_en.get(raw_label.lower(), raw_label)
+            
+            color = (0, 255, 0)
+            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+            
+            text = f"{label} {conf:.2f}"
+            t_size = cv2.getTextSize(text, 0, fontScale=0.5, thickness=1)[0]
+            c2 = x1 + t_size[0], y1 - t_size[1] - 3
+            cv2.rectangle(img, (x1, y1), c2, color, -1, cv2.LINE_AA)  # filled
+            cv2.putText(img, text, (x1, y1 - 2), 0, 0.5, [255, 255, 255], thickness=1, lineType=cv2.LINE_AA)
         
     return img
 

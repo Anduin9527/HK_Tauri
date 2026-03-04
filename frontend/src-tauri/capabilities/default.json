@@ -6,6 +6,15 @@
   "permissions": [
     "core:default",
     "opener:default",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "$APPDATA/HK_Tauri_Data/**" },
+        { "path": "$LOCALAPPDATA/HK_Tauri_Data/**" },
+        { "path": "$APPDATA/com.hk.luggage-defect-inspector/HK_Tauri_Data/**" },
+        { "path": "$LOCALAPPDATA/com.hk.luggage-defect-inspector/HK_Tauri_Data/**" }
+      ]
+    },
     "shell:default",
     {
       "identifier": "shell:allow-spawn",

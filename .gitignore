@@ -7,7 +7,7 @@ venv/
 .DS_Store
 
 # Backend
-backend/models/
+backend/models/*
 !backend/models/.keep
 backend/history/
 backend/runs/
@@ -23,7 +23,7 @@ dist/
 
 # Tauri
 src-tauri/target/
-src-tauri/bin/backend-*.exe
+frontend/src-tauri/bin/backend-*.exe
 
 # trae
 .trae/

@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import './App.css';
-import { Play, Square, Settings, Luggage, AlertTriangle, Cpu, Minimize2, Image as ImageIcon, RefreshCw, Link, Link2Off, Camera, Zap, Sun, Moon, Activity } from 'lucide-react';
+import { Play, Square, Settings, Luggage, AlertTriangle, Cpu, Minimize2, Image as ImageIcon, RefreshCw, Link, Link2Off, Camera, Zap, Sun, Moon, Activity, FolderOpen } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import VideoFeed from './components/VideoFeed';
 import clsx from 'clsx';
 
@@ -40,8 +41,8 @@ function App() {
     return () => clearInterval(interval);
   }, [streaming]);
 
-  const addLog = (title, message, severity, attachment = null) => {
-    setLogs(prev => [{ id: Date.now(), title, message, severity, attachment, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
+  const addLog = (title, message, severity, attachment = null, time = null) => {
+    setLogs(prev => [{ id: Date.now(), title, message, severity, attachment, time: time || new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
   };
 
   // Socket.IO Connection
@@ -49,7 +50,7 @@ function App() {
     const socket = io(BACKEND_URL);
 
     socket.on('log_message', (data) => {
-      addLog(data.title, data.message, data.severity, data.attachment);
+      addLog(data.title, data.message, data.severity, data.attachment, data.time);
     });
 
     socket.on('camera_fps', (data) => {
@@ -768,6 +769,25 @@ function SettingsPanel({ addLog }) {
   });
   const [loading, setLoading] = useState(false);
 
+  const openDataFolder = async () => {
+    try {
+      const res = await fetch(`${BACKEND_URL}/paths`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`路径接口异常: ${res.status} ${text || res.statusText}`);
+      }
+      const data = await res.json();
+      const target = data?.history_dir || data?.data_dir;
+      if (!target) {
+        throw new Error("未返回有效路径");
+      }
+      await invoke('open_path', { path: target });
+      addLog("系统", "已打开数据文件夹", "info");
+    } catch (e) {
+      addLog("错误", "无法打开文件夹: " + (e?.message || String(e)), "high");
+    }
+  };
+
   useEffect(() => {
     fetch(`${BACKEND_URL}/models`)
       .then(res => res.json())
@@ -843,6 +863,22 @@ function SettingsPanel({ addLog }) {
       </div>
 
       <div className="p-6 glass-card rounded-xl space-y-8">
+        
+        {/* Data Folder Access */}
+        <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-lg flex items-center justify-between">
+            <div>
+                <h3 className="text-sm font-medium text-indigo-300">数据与日志</h3>
+                <p className="text-xs text-indigo-200/60">查看后端运行日志 (backend.log) 和历史检测图片</p>
+            </div>
+            <button
+                onClick={openDataFolder}
+                className="px-4 py-2 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+                <FolderOpen size={16} />
+                打开文件夹
+            </button>
+        </div>
+
         {/* Model Selection */}
         <div className="space-y-4">
           <label className="text-sm font-medium text-[var(--text-main)]">推理模型 (Model)</label>

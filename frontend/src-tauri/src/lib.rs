@@ -1,14 +1,38 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::path::PathBuf;
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
+}
+
+#[tauri::command]
+fn open_data_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("HK_Tauri_Data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(data_dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn open_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let normalized = path.replace('/', "\\").to_lowercase();
+    if !normalized.contains("\\hk_tauri_data") {
+        return Err("path not allowed".to_string());
+    }
+    app.opener()
+        .open_path(path, None::<&str>)
+        .map_err(|e| e.to_string())
 }
 
 struct BackendProcess(std::sync::Mutex<Option<CommandChild>>);
@@ -30,18 +54,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            let exe_dir: Option<PathBuf> = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-
-            let mut data_dir = exe_dir
-                .map(|d| d.join("HK_Tauri_Data"))
-                .unwrap_or_else(|| PathBuf::from(".").join("HK_Tauri_Data"));
-
-            if std::fs::create_dir_all(&data_dir).is_err() {
-                data_dir = app.path().app_data_dir()?.join("HK_Tauri_Data");
-                std::fs::create_dir_all(&data_dir)?;
-            }
+            let data_dir = app.path().app_data_dir()?.join("HK_Tauri_Data");
+            std::fs::create_dir_all(&data_dir)?;
 
             let log_path = data_dir.join("backend.log");
 
@@ -77,7 +91,7 @@ pub fn run() {
                 kill_backend(&window.app_handle());
             }
         })
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, open_data_dir, open_path])
         .build(context)
         .expect("error while building tauri application");
 
