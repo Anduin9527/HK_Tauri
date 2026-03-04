@@ -3,6 +3,5 @@ opencv-python
 fastapi
 uvicorn
 python-socketio
-openvino-dev
 python-multipart
 lap>=0.5.12

@@ -904,15 +904,14 @@ function SettingsPanel({ addLog }) {
                 disabled={loading}
                 className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text-main)]"
               >
-                <option value="auto">auto (优先 OpenVINO)</option>
-                <option value="openvino">openvino</option>
+                <option value="auto">auto (优先 ONNX)</option>
                 <option value="onnx">onnx</option>
                 <option value="pt">pt</option>
               </select>
             </div>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
-            best.* 会被视为 yolo26s 的兼容别名；后续引入 yolo26n 只需放入对应文件名即可。
+            best.* 会被视为 yolo26s 的兼容别名；支持同系列多版本文件名。
           </p>
         </div>
 

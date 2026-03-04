@@ -191,7 +191,7 @@ async def lifespan(app: FastAPI):
 
         if not detector.is_loaded():
              print("[ERROR] AI Engine Initialization Failed: No model loaded.")
-             print("        Please ensure 'models/best.pt' (or .onnx/openvino) exists.")
+             print("        Please ensure 'models/best.pt' (or .onnx) exists.")
         else:
              print(f"[SUCCESS] AI Engine Ready.")
              print(f"          - Model: {detector.model_path}")
@@ -1060,7 +1060,7 @@ class SettingsModel(BaseModel):
     conf: float
     imgsz: int
     log_interval: int = 10
-    model_type: str = "auto" # pt, onnx, openvino, auto
+    model_type: str = "auto" # pt, onnx, auto
     model_name: str = "yolo26s"
     camera_params: Dict[str, Dict[str, float]] = {}
     scene_mode: str | None = None
@@ -1157,7 +1157,7 @@ async def update_settings(settings: SettingsModel):
             try:
                 selected = detector._select_best_available_model(target_name)
                 if selected is None:
-                    needs_reload = detector.current_model_type not in ("openvino", "onnx", "pt")
+                    needs_reload = detector.current_model_type not in ("onnx", "pt")
                 else:
                     best_path, best_type = selected
                     needs_reload = (
@@ -1166,7 +1166,7 @@ async def update_settings(settings: SettingsModel):
                         or (str(target_name) != str(detector.model_name))
                     )
             except Exception:
-                needs_reload = detector.current_model_type not in ("openvino", "onnx", "pt")
+                needs_reload = detector.current_model_type not in ("onnx", "pt")
         else:
             needs_reload = (target_type != detector.current_model_type) or (str(target_name) != str(detector.model_name))
         
