@@ -1,0 +1,75 @@
+
+Benchmarks complete for yolo26n.pt on coco8.yaml at imgsz=640 (286.94s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++----------------------------------------------------------------------------------------------------------+
+|      Format                  Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++==========================================================================================================+
+| 1    PyTorch                 ✅         5.3         0.6601                79.42                    12.59 |
+| 2    TorchScript             ✅         9.8         0.6881                138.21                   7.24  |
+| 3    ONNX                    ✅         9.5         0.6881                92.43                    10.82 |
+| 4    OpenVINO                ✅         9.7         0.6881                105.67                   9.46  |
+| 5    TensorRT                ❌         0.0         -                     -                        -     |
+| 6    CoreML                  ❌         0.0         -                     -                        -     |
+| 7    TensorFlow SavedModel   ❌         0.0         -                     -                        -     |
+| 8    TensorFlow GraphDef     ❌         0.0         -                     -                        -     |
+| 9    TensorFlow Lite         ❌         0.0         -                     -                        -     |
+| 10   TensorFlow Edge TPU     ❌         0.0         -                     -                        -     |
+| 11   TensorFlow.js           ❌         0.0         -                     -                        -     |
+| 12   PaddlePaddle            ❌         0.0         -                     -                        -     |
+| 13   MNN                     ❌         0.0         -                     -                        -     |
+| 14   NCNN                    ❌         0.0         -                     -                        -     |
+| 15   IMX                     ❌         0.0         -                     -                        -     |
+| 16   RKNN                    ❌         0.0         -                     -                        -     |
+| 17   ExecuTorch              ❌         0.0         -                     -                        -     |
+| 18   Axelera                 ❌         0.0         -                     -                        -     |
++----------------------------------------------------------------------------------------------------------+
+
+Benchmarks complete for yolo26n.pt on coco8.yaml at imgsz=640 (239.79s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++----------------------------------------------------------------------------------------------------------+
+|      Format                  Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS   |
++==========================================================================================================+
+| 1    PyTorch                 ✅         5.3         0.6601                85.66                    11.67 |
+| 2    TorchScript             ✅         9.8         0.6881                145.83                   6.86  |
+| 3    ONNX                    ✅         9.5         0.6881                98.54                    10.15 |
+| 4    OpenVINO                ✅         9.7         0.6881                113.69                   8.8   |
+| 5    TensorRT                ❌         0.0         -                     -                        -     |
+| 6    CoreML                  ❌         0.0         -                     -                        -     |
+| 7    TensorFlow SavedModel   ❌         0.0         -                     -                        -     |
+| 8    TensorFlow GraphDef     ✅         9.5         0.6881                185.93                   5.38  |
+| 9    TensorFlow Lite         ✅         9.9         0.6881                112.29                   8.91  |
+| 10   TensorFlow Edge TPU     ❌         0.0         -                     -                        -     |
+| 11   TensorFlow.js           ❌         0.0         -                     -                        -     |
+| 12   PaddlePaddle            ❌         0.0         -                     -                        -     |
+| 13   MNN                     ✅         9.4         0.6881                55.67                    17.96 |
+| 14   NCNN                    ✅         9.3         0.671                 118.34                   8.45  |
+| 15   IMX                     ❌         0.0         -                     -                        -     |
+| 16   RKNN                    ❌         0.0         -                     -                        -     |
+| 17   ExecuTorch              ✅         9.4         0.671                 64.99                    15.39 |
+| 18   Axelera                 ❌         0.0         -                     -                        -     |
++----------------------------------------------------------------------------------------------------------+
+
+Benchmarks complete for yolo26s.pt on coco8.yaml at imgsz=640 (185.18s)
+Benchmarks legend:  - ✅ Success  - ❎ Export passed but validation failed  - ❌️ Export failed
++---------------------------------------------------------------------------------------------------------+
+|      Format                  Status❔   Size (MB)   metrics/mAP50-95(B)   Inference time (ms/im)   FPS  |
++=========================================================================================================+
+| 1    PyTorch                 ✅         19.5        0.689                 158.59                   6.31 |
+| 2    TorchScript             ✅         36.8        0.6667                210.59                   4.75 |
+| 3    ONNX                    ✅         36.5        0.6667                168.38                   5.94 |
+| 4    OpenVINO                ✅         36.7        0.6667                431.06                   2.32 |
+| 5    TensorRT                ❌         0.0         -                     -                        -    |
+| 6    CoreML                  ❌         0.0         -                     -                        -    |
+| 7    TensorFlow SavedModel   ✅         92.2        0.6667                334.46                   2.99 |
+| 8    TensorFlow GraphDef     ✅         36.5        0.6667                508.39                   1.97 |
+| 9    TensorFlow Lite         ✅         36.9        0.6667                287.32                   3.48 |
+| 10   TensorFlow Edge TPU     ❌         0.0         -                     -                        -    |
+| 11   TensorFlow.js           ❌         0.0         -                     -                        -    |
+| 12   PaddlePaddle            ❌         0.0         -                     -                        -    |
+| 13   MNN                     ✅         36.4        0.6667                138.72                   7.21 |
+| 14   NCNN                    ✅         36.4        0.6695                273.07                   3.66 |
+| 15   IMX                     ❌         0.0         -                     -                        -    |
+| 16   RKNN                    ❌         0.0         -                     -                        -    |
+| 17   ExecuTorch              ✅         36.5        0.6695                165.08                   6.06 |
+| 18   Axelera                 ❌         0.0         -                     -                        -    |
++---------------------------------------------------------------------------------------------------------+
