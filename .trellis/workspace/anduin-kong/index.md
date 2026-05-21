@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-05-21
 <!-- @@@/auto:current-status -->
 
@@ -30,6 +30,7 @@
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
 | 1 | 2026-05-21 | 性能优化：OpenVINO推理、跳帧策略、流循环打包、前端清理 | `ccc42eb` | `main` |
+| 2 | 2026-05-21 | 前端界面优化：解耦App.jsx、组件模块化、1080P布局适配、暗黑模式设计 | `pending` | `main` |
 <!-- @@@/auto:session-history -->
 
 ---

@@ -13,8 +13,9 @@
     "windows": [
       {
         "title": "旅行箱表面缺陷检测系统",
-        "width": 800,
-        "height": 600
+        "width": 1536,
+        "height": 864,
+        "center": true
       }
     ],
     "security": {
