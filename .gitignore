@@ -7,6 +7,8 @@ venv/
 .DS_Store
 
 # Backend
+*.npy
+backend/package-lock.json
 backend/models/*
 !backend/models/.keep
 backend/history/
@@ -27,3 +29,10 @@ frontend/src-tauri/bin/backend-*.exe
 
 # trae
 .trae/
+
+# Claude / AI tools
+.agents/
+.claude/
+.codex/
+.trellis/
+AGENTS.md
