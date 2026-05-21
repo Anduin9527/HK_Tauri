@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify changes follow frontend quality standards"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify sidecar binary path resolution and env vars are correct"}
