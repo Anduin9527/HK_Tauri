@@ -48,6 +48,8 @@ class DefectDetector:
             return "onnx"
         if path.endswith(".pt"):
             return "pt"
+        if os.path.isdir(path) and os.path.exists(os.path.join(path, "best.xml")):
+            return "openvino"
         return "unknown"
 
     def _infer_name_from_path(self, path: str) -> str | None:
@@ -98,12 +100,30 @@ class DefectDetector:
             result.append((latest_pt, "pt"))
         return result
 
+    def _find_openvino_model(self, models_dir: str, model_name: str):
+        """Find OpenVINO model directory for the given model name."""
+        # Check for {name}_openvino_model/ directory
+        ov_dir = os.path.join(models_dir, f"{model_name}_openvino_model")
+        if os.path.isdir(ov_dir) and os.path.exists(os.path.join(ov_dir, "best.xml")):
+            return ov_dir
+        # Check for best_openvino_model/ directory
+        ov_dir = os.path.join(models_dir, "best_openvino_model")
+        if os.path.isdir(ov_dir) and os.path.exists(os.path.join(ov_dir, "best.xml")):
+            return ov_dir
+        return None
+
     def _select_best_available_model(self, model_name: str):
         models_dir = self._get_models_dir()
         if not models_dir:
             return None
 
+        # Priority: openvino > onnx > pt
         candidates = []
+
+        # 1. OpenVINO (highest priority — 1.6x faster on CPU)
+        ov_path = self._find_openvino_model(models_dir, model_name)
+        if ov_path:
+            candidates.append((ov_path, "openvino"))
 
         if model_name in ("yolo26s", "yolo26n"):
             prefix_matches = self._find_prefixed_model(models_dir, model_name)
@@ -118,20 +138,12 @@ class DefectDetector:
                 ]
             )
 
-        if model_name == "yolo26s" or not model_name:
-            candidates.extend(
-                [
-                    (os.path.join(models_dir, "best.onnx"), "onnx"),
-                    (os.path.join(models_dir, "best.pt"), "pt"),
-                ]
-            )
-        elif model_name != "yolo26s":
-            candidates.extend(
-                [
-                    (os.path.join(models_dir, "best.onnx"), "onnx"),
-                    (os.path.join(models_dir, "best.pt"), "pt"),
-                ]
-            )
+        candidates.extend(
+            [
+                (os.path.join(models_dir, "best.onnx"), "onnx"),
+                (os.path.join(models_dir, "best.pt"), "pt"),
+            ]
+        )
 
         for path, t in candidates:
             if os.path.exists(path):
@@ -152,11 +164,18 @@ class DefectDetector:
                     base = name.rsplit(".", 1)[0]
                     if base == "best":
                         base = "yolo26s"
-                    info = found.setdefault(base, {"name": base, "pt": False, "onnx": False})
+                    info = found.setdefault(base, {"name": base, "pt": False, "onnx": False, "openvino": False})
                     if name.endswith(".pt"):
                         info["pt"] = True
                     if name.endswith(".onnx"):
                         info["onnx"] = True
+            elif os.path.isdir(full) and name.endswith("_openvino_model"):
+                base = name.replace("_openvino_model", "")
+                if base == "best":
+                    base = "yolo26s"
+                if os.path.exists(os.path.join(full, "best.xml")):
+                    info = found.setdefault(base, {"name": base, "pt": False, "onnx": False, "openvino": False})
+                    info["openvino"] = True
 
         result = list(found.values())
         result.sort(key=lambda x: x["name"])
@@ -176,7 +195,15 @@ class DefectDetector:
         else:
             models_dir = self._get_models_dir()
             if models_dir:
-                if model_type == "onnx":
+                if model_type == "openvino":
+                    ov_path = self._find_openvino_model(models_dir, self.model_name)
+                    if ov_path and os.path.isdir(ov_path):
+                        new_path = ov_path
+                    if not new_path:
+                        ov_path = self._find_openvino_model(models_dir, "best")
+                        if ov_path and os.path.isdir(ov_path):
+                            new_path = ov_path
+                elif model_type == "onnx":
                     if self.model_name in ("yolo26s", "yolo26n"):
                         for path, t in self._find_prefixed_model(models_dir, self.model_name):
                             if t == "onnx" and os.path.exists(path):
@@ -266,7 +293,12 @@ class DefectDetector:
 
         for path, model_type in attempts:
             try:
-                if model_type == "onnx" or path.endswith(".onnx"):
+                if model_type == "openvino" or (os.path.isdir(path) and os.path.exists(os.path.join(path, "best.xml"))):
+                    print(f"Loading OpenVINO model: {path}...")
+                    model = YOLO(path, task="detect")
+                    device = "cpu"
+                    resolved_type = "openvino"
+                elif model_type == "onnx" or path.endswith(".onnx"):
                     print(f"Loading ONNX model: {path}...")
                     model = YOLO(path, task="detect")
                     device = "cpu"

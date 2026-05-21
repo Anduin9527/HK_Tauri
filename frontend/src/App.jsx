@@ -30,17 +30,6 @@ function App() {
   // Fullscreen State for a specific slot
   const [maximizedSlot, setMaximizedSlot] = useState(null); // null or slotId (0-3)
 
-  // Simulate stats update
-  useEffect(() => {
-    if (!streaming) return;
-    const interval = setInterval(() => {
-      // Only update simulated stats if no real data (fallback)
-      // In real scenario, `fetchStats` updates `stats`
-      // We keep this just for visual liveness if backend is dumb
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [streaming]);
-
   const addLog = (title, message, severity, attachment = null, time = null) => {
     setLogs(prev => [{ id: Date.now(), title, message, severity, attachment, time: time || new Date().toLocaleTimeString() }, ...prev].slice(0, 50));
   };
@@ -217,26 +206,6 @@ function App() {
       }
     } catch (e) {
       console.error("Error toggling stream:", e);
-    }
-  };
-
-  const toggleSceneMode = async () => {
-    const nextMode = sceneMode === 'day' ? 'night' : 'day';
-    try {
-      const res = await fetch(`${BACKEND_URL}/config/scene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scene_mode: nextMode })
-      });
-      const data = await res.json();
-      if (data.status === 'updated') {
-        setSceneMode(nextMode);
-        addLog("配置", `场景模式切换为: ${nextMode === 'day' ? '日间' : '夜间'}`, "info");
-      } else {
-        addLog("错误", `场景模式切换失败: ${data.error || 'Unknown'}`, "high");
-      }
-    } catch (e) {
-      addLog("错误", "场景模式切换异常: " + e.message, "high");
     }
   };
 
@@ -560,7 +529,7 @@ function App() {
                   <div className="glass-card p-4 rounded-xl flex flex-col gap-1">
                     <span className="text-xs text-gray-400 uppercase tracking-wider">场景模式</span>
                     <button
-                      onClick={toggleSceneMode}
+                      onClick={toggleScene}
                       className={clsx(
                         "mt-2 px-3 py-2 rounded-lg border text-sm font-medium transition-all flex items-center justify-center gap-2",
                         sceneMode === 'day'
@@ -683,7 +652,7 @@ function App() {
                     // Refresh logs
                     fetch(`${BACKEND_URL}/logs?lines=100`)
                       .then(res => res.json())
-                      .then(data => setLogs(data.logs.map((l, i) => ({ ...l, id: i })) || []));
+                      .then(data => setLogs(data.logs.map((l, i) => ({ ...l, id: `${l.time}-${i}` })) || []));
                   }}
                   className="px-4 py-2 bg-[var(--bg-card)] hover:bg-[var(--bg-glass)] rounded-lg text-sm text-[var(--text-main)] transition-colors"
                 >
@@ -701,8 +670,8 @@ function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border)]">
-                    {logs.map((log, i) => (
-                      <tr key={i} className="hover:bg-[var(--bg-card)] transition-colors">
+                    {logs.map((log) => (
+                      <tr key={log.time + log.title + log.message} className="hover:bg-[var(--bg-card)] transition-colors">
                         <td className="p-4 font-mono text-[var(--text-muted)] whitespace-nowrap">{log.time}</td>
                         <td className="p-4">
                           <span className={clsx(
@@ -762,10 +731,10 @@ function SettingsPanel({ addLog }) {
   const [modelName, setModelName] = useState('yolo26s');
   const [availableModels, setAvailableModels] = useState([]);
   const [cameraParams, setCameraParams] = useState({
-    "0": { exposure_time_us: 50000, gain_db: 0 },
-    "1": { exposure_time_us: 50000, gain_db: 0 },
-    "2": { exposure_time_us: 50000, gain_db: 0 },
-    "3": { exposure_time_us: 50000, gain_db: 0 },
+    "0": { exposure_time_us: 50000, gain_db: 0, exposure_mode: "manual" },
+    "1": { exposure_time_us: 50000, gain_db: 0, exposure_mode: "manual" },
+    "2": { exposure_time_us: 50000, gain_db: 0, exposure_mode: "manual" },
+    "3": { exposure_time_us: 50000, gain_db: 0, exposure_mode: "manual" },
   });
   const [loading, setLoading] = useState(false);
 
@@ -904,7 +873,8 @@ function SettingsPanel({ addLog }) {
                 disabled={loading}
                 className="w-full bg-[var(--bg-card)] border border-[var(--border)] rounded px-3 py-2 text-sm text-[var(--text-main)]"
               >
-                <option value="auto">auto (优先 ONNX)</option>
+                <option value="auto">auto (优先 OpenVINO)</option>
+                <option value="openvino">openvino</option>
                 <option value="onnx">onnx</option>
                 <option value="pt">pt</option>
               </select>
@@ -919,49 +889,81 @@ function SettingsPanel({ addLog }) {
         <div className="space-y-4">
           <label className="text-sm font-medium text-[var(--text-main)]">相机参数 (每路)</label>
           <div className="space-y-3">
-            {["0", "1", "2", "3"].map((slotKey) => (
-              <div key={slotKey} className="grid grid-cols-3 gap-3 items-center bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-3">
-                <div className="text-sm text-[var(--text-main)]">Slot {slotKey}</div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-muted)] whitespace-nowrap">曝光(µs)</span>
-                  <input
-                    type="number"
-                    min="1"
-                    step="100"
-                    value={cameraParams?.[slotKey]?.exposure_time_us ?? 50000}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setCameraParams(prev => ({
-                        ...prev,
-                        [slotKey]: { ...(prev?.[slotKey] || {}), exposure_time_us: Number.isFinite(v) ? v : 50000 }
-                      }));
-                    }}
-                    className="w-full bg-[var(--bg-dark)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text-main)]"
-                    disabled={loading}
-                  />
+            {["0", "1", "2", "3"].map((slotKey) => {
+              const isAuto = cameraParams?.[slotKey]?.exposure_mode === "auto";
+              return (
+                <div key={slotKey} className="bg-[var(--bg-card)] border border-[var(--border)] rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-[var(--text-main)]">Slot {slotKey}</span>
+                    <button
+                      onClick={() => {
+                        const nextMode = isAuto ? "manual" : "auto";
+                        setCameraParams(prev => ({
+                          ...prev,
+                          [slotKey]: { ...(prev?.[slotKey] || {}), exposure_mode: nextMode }
+                        }));
+                      }}
+                      className={clsx(
+                        "px-3 py-1 rounded-full text-xs font-medium border transition-all",
+                        isAuto
+                          ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                          : "bg-[var(--bg-dark)] text-[var(--text-muted)] border-[var(--border)]"
+                      )}
+                    >
+                      {isAuto ? "自动曝光" : "手动曝光"}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[var(--text-muted)] whitespace-nowrap w-16">曝光(µs)</span>
+                      <input
+                        type="number"
+                        min="1"
+                        step="100"
+                        value={cameraParams?.[slotKey]?.exposure_time_us ?? 50000}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          setCameraParams(prev => ({
+                            ...prev,
+                            [slotKey]: { ...(prev?.[slotKey] || {}), exposure_time_us: Number.isFinite(v) ? v : 50000 }
+                          }));
+                        }}
+                        className={clsx(
+                          "w-full border rounded px-2 py-1 text-sm text-[var(--text-main)] transition-opacity",
+                          isAuto
+                            ? "bg-[var(--bg-dark)]/50 border-[var(--border)]/50 opacity-40 cursor-not-allowed"
+                            : "bg-[var(--bg-dark)] border-[var(--border)]"
+                        )}
+                        disabled={loading || isAuto}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[var(--text-muted)] whitespace-nowrap w-16">增益(dB)</span>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={cameraParams?.[slotKey]?.gain_db ?? 0}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value);
+                          setCameraParams(prev => ({
+                            ...prev,
+                            [slotKey]: { ...(prev?.[slotKey] || {}), gain_db: Number.isFinite(v) ? v : 0 }
+                          }));
+                        }}
+                        className="w-full bg-[var(--bg-dark)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text-main)]"
+                        disabled={loading}
+                      />
+                    </div>
+                  </div>
+                  {isAuto && (
+                    <p className="text-[10px] text-emerald-400/60">相机硬件自动调节曝光时间</p>
+                  )}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[var(--text-muted)] whitespace-nowrap">增益(dB)</span>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={cameraParams?.[slotKey]?.gain_db ?? 0}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setCameraParams(prev => ({
-                        ...prev,
-                        [slotKey]: { ...(prev?.[slotKey] || {}), gain_db: Number.isFinite(v) ? v : 0 }
-                      }));
-                    }}
-                    className="w-full bg-[var(--bg-dark)] border border-[var(--border)] rounded px-2 py-1 text-sm text-[var(--text-main)]"
-                    disabled={loading}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <p className="text-xs text-[var(--text-muted)]">
-            保存后会写入本地配置，并在相机连接时自动应用；已连接的相机也会立即尝试应用。
+            自动曝光由相机硬件控制，适合光照变化场景；手动模式可精确控制曝光参数。保存后立即生效。
           </p>
         </div>
 

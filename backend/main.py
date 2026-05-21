@@ -88,6 +88,9 @@ device_op_locks: Dict[int, asyncio.Lock] = {}
 model_reload_lock: asyncio.Lock | None = None
 model_reloading = False
 
+# Per-slot inference busy tracking for frame-skip
+infer_busy: Dict[int, bool] = {0: False, 1: False, 2: False, 3: False}
+
 # Logging throttling
 log_cooldown = 10.0 # seconds
 last_log_time: Dict[int, float] = {} 
@@ -507,8 +510,48 @@ def _build_encoded_variants(full_frame, grid_frame, dets_full, dets_grid, qualit
     }
 
 
+def _batch_process_frame(
+    full_frame, grid_width: int,
+    needs_grid: bool, needs_full: bool,
+    wants_detect: bool,
+    dets_grid: list, dets_full: list,
+    grid_quality: int, full_quality: int,
+    watchers: dict,
+    pre_grid_frame=None,
+):
+    """Batch resize + draw + encode in a single thread call to reduce scheduling overhead."""
+    result = {}
+
+    # Resize for grid if needed (reuse pre-computed if available)
+    grid_frame = None
+    if needs_grid or wants_detect:
+        grid_frame = pre_grid_frame if pre_grid_frame is not None else _resize_to_width(full_frame, grid_width)
+
+    # Grid encoding
+    if needs_grid and grid_frame is not None:
+        grid_raw = _encode_jpeg(grid_frame, grid_quality)
+        result[("grid", "raw")] = grid_raw
+        if (watchers.get("grid") or {}).get("detect", 0) > 0:
+            if dets_grid:
+                result[("grid", "detect")] = _encode_jpeg(draw_detections(grid_frame.copy(), dets_grid), grid_quality)
+            else:
+                result[("grid", "detect")] = grid_raw
+
+    # Full encoding
+    if needs_full:
+        full_raw = _encode_jpeg(full_frame, full_quality)
+        result[("full", "raw")] = full_raw
+        if (watchers.get("full") or {}).get("detect", 0) > 0:
+            if dets_full:
+                result[("full", "detect")] = _encode_jpeg(draw_detections(full_frame.copy(), dets_full), full_quality)
+            else:
+                result[("full", "detect")] = full_raw
+
+    return result, grid_frame
+
+
 async def _camera_stream_worker(camera_id: int):
-    global cameras, detector, running, auto_inference, camera_detections, stream_state, last_log_time, model_reloading
+    global cameras, detector, running, auto_inference, camera_detections, stream_state, last_log_time, model_reloading, infer_busy
 
     fps_limit = 30
     frame_duration = 1.0 / fps_limit
@@ -519,10 +562,7 @@ async def _camera_stream_worker(camera_id: int):
     grid_quality = 75
 
     last_inference_time = 0.0
-    infer_ms_ema = 0.0
-    infer_fps_ema = 0.0
     last_stream_tick = 0.0
-    last_infer_tick = 0.0
     stream_fps_ema = 0.0
     last_frame_seq = None
 
@@ -550,8 +590,8 @@ async def _camera_stream_worker(camera_id: int):
 
             if not wants_any:
                 camera_detections[camera_id] = []
-                infer_ms_ema = 0.0
-                infer_fps_ema = 0.0
+                st["stats"]["infer_ms_ema"] = 0.0
+                st["stats"]["infer_fps_ema"] = 0.0
                 await asyncio.sleep(0.2)
                 continue
 
@@ -567,78 +607,87 @@ async def _camera_stream_worker(camera_id: int):
             now_pc = time.perf_counter()
             now_wall = time.time()
 
-            grid_frame = None
+            # Check if inference should run (before batch processing, need grid_frame)
+            # We need a preliminary resize to get grid_frame for inference
+            prelim_grid = None
             if needs_grid or wants_detect:
-                grid_frame = await asyncio.to_thread(_resize_to_width, full_frame, grid_width)
-                if grid_frame is None:
+                prelim_grid = await asyncio.to_thread(_resize_to_width, full_frame, grid_width)
+                if prelim_grid is None:
                     await asyncio.sleep(0.01)
                     continue
 
             should_infer = False
-            if (not model_reloading) and detector and auto_inference and wants_detect and (now_pc - last_inference_time >= inference_interval) and (grid_frame is not None):
+            if (not model_reloading) and detector and auto_inference and wants_detect and (now_pc - last_inference_time >= inference_interval) and (prelim_grid is not None) and not infer_busy[camera_id]:
                 should_infer = True
                 last_inference_time = now_pc
 
             if should_infer:
-                t0 = time.perf_counter()
-                results, _ = await asyncio.to_thread(detector.predict, grid_frame, False)
-                infer_ms = (time.perf_counter() - t0) * 1000.0
-                infer_ms_ema = infer_ms if infer_ms_ema <= 0 else (infer_ms_ema * 0.8 + infer_ms * 0.2)
-                camera_detections[camera_id] = results
-                infer_end = time.perf_counter()
-                if last_infer_tick:
-                    inst = 1.0 / max(1e-6, (infer_end - last_infer_tick))
-                    infer_fps_ema = inst if infer_fps_ema <= 0 else (infer_fps_ema * 0.8 + inst * 0.2)
-                last_infer_tick = infer_end
+                # Fire-and-forget: run inference in background, don't block stream
+                infer_busy[camera_id] = True
+                frame_for_infer = prelim_grid.copy()
 
-                if len(results) > 0:
-                    last_log = last_log_time.get(camera_id, 0)
-                    if now_wall - last_log > log_cooldown:
-                        timestamp = int(now_wall * 1000)
-                        filename = f"auto_detect_slot{camera_id}_{timestamp}.jpg"
-                        filepath = os.path.join(HISTORY_DIR, filename)
-                        annotated = await asyncio.to_thread(draw_detections, grid_frame.copy(), results)
-                        await asyncio.to_thread(cv2.imwrite, filepath, annotated)
-                        image_url = f"http://localhost:8000/history/{filename}"
-                        await broadcast_log(
-                            f"实时告警 (Cam {camera_id})",
-                            f"发现 {len(results)} 个异常目标 | Model={detector.model_name}/{detector.current_model_type} ({detector.device}) | conf={detector.conf}, imgsz={detector.imgsz}",
-                            "medium",
-                            attachment=image_url,
-                        )
-                        last_log_time[camera_id] = now_wall
-            else:
-                camera_detections[camera_id] = []
-                infer_ms_ema = 0.0
-                infer_fps_ema = 0.0
+                async def _run_infer(sid, frame, _now_wall):
+                    global camera_detections, last_log_time
+                    try:
+                        t0 = time.perf_counter()
+                        results, _ = await asyncio.to_thread(detector.predict, frame, False)
+                        infer_ms = (time.perf_counter() - t0) * 1000.0
+                        # Update EMA in stream_state directly
+                        st_ref = stream_state.get(sid)
+                        if st_ref:
+                            old_ms = st_ref["stats"].get("infer_ms_ema", 0.0)
+                            st_ref["stats"]["infer_ms_ema"] = infer_ms if old_ms <= 0 else (old_ms * 0.8 + infer_ms * 0.2)
+                            old_tick = st_ref["stats"].get("_last_infer_tick", 0.0)
+                            now_tick = time.perf_counter()
+                            if old_tick:
+                                inst = 1.0 / max(1e-6, (now_tick - old_tick))
+                                old_fps = st_ref["stats"].get("infer_fps_ema", 0.0)
+                                st_ref["stats"]["infer_fps_ema"] = inst if old_fps <= 0 else (old_fps * 0.8 + inst * 0.2)
+                            st_ref["stats"]["_last_infer_tick"] = now_tick
+                        camera_detections[sid] = results
 
-            dets_grid = camera_detections.get(camera_id, []) if (grid_frame is not None) else []
+                        if len(results) > 0:
+                            last_log = last_log_time.get(sid, 0)
+                            if _now_wall - last_log > log_cooldown:
+                                ts = int(_now_wall * 1000)
+                                fname = f"auto_detect_slot{sid}_{ts}.jpg"
+                                fpath = os.path.join(HISTORY_DIR, fname)
+                                annotated = await asyncio.to_thread(draw_detections, frame.copy(), results)
+                                await asyncio.to_thread(cv2.imwrite, fpath, annotated)
+                                img_url = f"http://localhost:8000/history/{fname}"
+                                await broadcast_log(
+                                    f"实时告警 (Cam {sid})",
+                                    f"发现 {len(results)} 个异常目标 | Model={detector.model_name}/{detector.current_model_type} ({detector.device}) | conf={detector.conf}, imgsz={detector.imgsz}",
+                                    "medium",
+                                    attachment=img_url,
+                                )
+                                last_log_time[sid] = _now_wall
+                    except Exception as e:
+                        print(f"[InferWorker {sid}] error: {e}")
+                    finally:
+                        infer_busy[sid] = False
+
+                asyncio.create_task(_run_infer(camera_id, frame_for_infer, now_wall))
+            # When not inferring, keep last detections (don't clear)
+
+            # Get current detections for encoding
+            dets_grid = camera_detections.get(camera_id, []) if (prelim_grid is not None) else []
             dets_full = []
-            if needs_full and wants_detect and dets_grid and grid_frame is not None:
-                sx = full_frame.shape[1] / float(grid_frame.shape[1])
-                sy = full_frame.shape[0] / float(grid_frame.shape[0])
+            if needs_full and wants_detect and dets_grid and prelim_grid is not None:
+                sx = full_frame.shape[1] / float(prelim_grid.shape[1])
+                sy = full_frame.shape[0] / float(prelim_grid.shape[0])
                 dets_full = _scale_detections_xyxy(dets_grid, sx, sy)
 
-            encoded = {}
-            if needs_grid and grid_frame is not None:
-                grid_raw = await asyncio.to_thread(_encode_jpeg, grid_frame, grid_quality)
-                encoded[("grid", "raw")] = grid_raw
-                if (watchers.get("grid") or {}).get("detect", 0) > 0:
-                    if dets_grid:
-                        grid_detect = await asyncio.to_thread(_encode_jpeg, draw_detections(grid_frame.copy(), dets_grid), grid_quality)
-                        encoded[("grid", "detect")] = grid_detect
-                    else:
-                        encoded[("grid", "detect")] = grid_raw
-
-            if needs_full:
-                full_raw = await asyncio.to_thread(_encode_jpeg, full_frame, full_quality)
-                encoded[("full", "raw")] = full_raw
-                if (watchers.get("full") or {}).get("detect", 0) > 0:
-                    if dets_full:
-                        full_detect = await asyncio.to_thread(_encode_jpeg, draw_detections(full_frame.copy(), dets_full), full_quality)
-                        encoded[("full", "detect")] = full_detect
-                    else:
-                        encoded[("full", "detect")] = full_raw
+            # Batch all encoding into a single thread call (reuse prelim_grid to avoid duplicate resize)
+            encoded, grid_frame = await asyncio.to_thread(
+                _batch_process_frame,
+                full_frame, grid_width,
+                needs_grid, needs_full, wants_detect,
+                dets_grid, dets_full,
+                grid_quality, full_quality,
+                watchers,
+                prelim_grid,
+            )
 
             now_pc2 = time.perf_counter()
             inst_stream = 0.0 if not last_stream_tick else 1.0 / max(1e-6, (now_pc2 - last_stream_tick))
@@ -654,8 +703,8 @@ async def _camera_stream_worker(camera_id: int):
                 st["stats"]["camera_fps"] = float(cam_fps or 0.0)
                 st["stats"]["capture_fps"] = float(cam_fps or 0.0)
                 st["stats"]["stream_fps"] = float(stream_fps_ema)
-                st["stats"]["infer_fps"] = float(infer_fps_ema)
-                st["stats"]["infer_ms"] = float(infer_ms_ema)
+                st["stats"]["infer_fps"] = float(st["stats"].get("infer_fps_ema", 0.0))
+                st["stats"]["infer_ms"] = float(st["stats"].get("infer_ms_ema", 0.0))
                 st["stats"]["infer_updated_at"] = float(now_wall if should_infer else 0.0)
                 st["stats"]["updated_at"] = float(now_wall)
                 st["cond"].notify_all()
@@ -876,7 +925,8 @@ async def connect_camera(request: ConnectRequest, slot_id: int = Path(..., ge=0,
                         cfg = persisted_settings.get("camera_params", {}).get(str(slot_id), {})
                         exposure_time_us = cfg.get("exposure_time_us")
                         gain_db = cfg.get("gain_db")
-                        ok, msg = await asyncio.to_thread(cam.apply_params, exposure_time_us, gain_db)
+                        exposure_mode = cfg.get("exposure_mode", "manual")
+                        ok, msg = await asyncio.to_thread(cam.apply_params, exposure_time_us, gain_db, exposure_mode)
                         if ok:
                             await broadcast_log("配置", f"Slot {slot_id} 相机参数已应用: {msg}", "info")
                         else:
@@ -907,6 +957,7 @@ async def disconnect_camera(slot_id: int = Path(..., ge=0, le=3)):
             async with sdk_op_lock:
                 await asyncio.to_thread(cameras[slot_id].release)
             camera_detections[slot_id] = []
+            infer_busy[slot_id] = False
             st = stream_state.get(slot_id)
             if st:
                 async with st["cond"]:
@@ -1062,7 +1113,7 @@ class SettingsModel(BaseModel):
     log_interval: int = 10
     model_type: str = "auto" # pt, onnx, auto
     model_name: str = "yolo26s"
-    camera_params: Dict[str, Dict[str, float]] = {}
+    camera_params: Dict[str, Dict] = {}
     scene_mode: str | None = None
 
 
@@ -1144,6 +1195,10 @@ async def update_settings(settings: SettingsModel):
                 persisted_settings["camera_params"][slot_key]["exposure_time_us"] = float(v["exposure_time_us"])
             if "gain_db" in v:
                 persisted_settings["camera_params"][slot_key]["gain_db"] = float(v["gain_db"])
+            if "exposure_mode" in v:
+                mode = str(v["exposure_mode"])
+                if mode in ("auto", "manual"):
+                    persisted_settings["camera_params"][slot_key]["exposure_mode"] = mode
 
     save_settings(persisted_settings)
     
@@ -1203,7 +1258,8 @@ async def update_settings(settings: SettingsModel):
             cfg = persisted_settings.get("camera_params", {}).get(slot_key, {})
             exposure_time_us = cfg.get("exposure_time_us")
             gain_db = cfg.get("gain_db")
-            ok, msg = await asyncio.to_thread(cam.apply_params, exposure_time_us, gain_db)
+            exposure_mode = cfg.get("exposure_mode", "manual")
+            ok, msg = await asyncio.to_thread(cam.apply_params, exposure_time_us, gain_db, exposure_mode)
             applied.append((slot_id, ok, msg))
         for slot_id, ok, msg in applied:
             await broadcast_log(

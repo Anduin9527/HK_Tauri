@@ -5,16 +5,22 @@ import { Camera, AlertCircle, Maximize2, Minimize2, Eye, EyeOff } from 'lucide-r
 const VideoFeed = ({ streamUrl, isConnected, onMaximize, isMaximized, fps, autoInference }) => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(false);
-    // const [fullScreen, setFullScreen] = useState(false); // Removed internal fullscreen state
     const [showDetections, setShowDetections] = useState(true);
     const [activeUrl, setActiveUrl] = useState("");
     const [lastGoodUrl, setLastGoodUrl] = useState("");
+    const retryRef = React.useRef({ attempt: 0, timer: null });
 
-    // Use consistent profile to prevent reloading on maximize/minimize
-    const profile = 'grid'; // Always use grid profile for seamless transition
+    const profile = 'grid';
     const finalUrl = streamUrl ? `${streamUrl}?type=${showDetections ? 'detect' : 'raw'}&profile=${profile}` : "";
 
     useEffect(() => {
+        // Clear any pending retry on URL/toggle change
+        if (retryRef.current.timer) {
+            clearTimeout(retryRef.current.timer);
+            retryRef.current.timer = null;
+        }
+        retryRef.current.attempt = 0;
+
         if (!finalUrl) {
             setActiveUrl("");
             setLastGoodUrl("");
@@ -25,7 +31,14 @@ const VideoFeed = ({ streamUrl, isConnected, onMaximize, isMaximized, fps, autoI
         setActiveUrl(finalUrl);
         setIsLoading(true);
         setError(false);
-    }, [streamUrl, showDetections, profile]); // Reload when URL or toggle changes
+    }, [streamUrl, showDetections, profile]);
+
+    // Cleanup retry timer on unmount
+    useEffect(() => {
+        return () => {
+            if (retryRef.current.timer) clearTimeout(retryRef.current.timer);
+        };
+    }, []);
 
     return (
         <div className={clsx(
@@ -111,10 +124,20 @@ const VideoFeed = ({ streamUrl, isConnected, onMaximize, isMaximized, fps, autoI
                                 setLastGoodUrl(activeUrl);
                                 setIsLoading(false);
                                 setError(false);
+                                retryRef.current.attempt = 0;
                             }}
                             onError={() => {
                                 setError(true);
                                 setIsLoading(false);
+                                // Retry with exponential backoff (1s, 2s, 4s, max 8s)
+                                const attempt = retryRef.current.attempt;
+                                if (attempt < 5 && isConnected && activeUrl) {
+                                    const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+                                    retryRef.current.attempt = attempt + 1;
+                                    retryRef.current.timer = setTimeout(() => {
+                                        setActiveUrl(prev => prev + (prev.includes('?') ? '&' : '?') + '_t=' + Date.now());
+                                    }, delay);
+                                }
                             }}
                         />
                     </>
